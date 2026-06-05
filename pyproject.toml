@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thermalkit"
+version = "0.1.0"
+description = "Thermal-aware adaptive ML inference throttler for Apple Silicon"
+requires-python = ">=3.11"
+dependencies = [
+    "mlx>=0.31",
+    "mlx-lm>=0.31",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+thermalkit = "thermalkit.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["thermalkit*"]
+
+[tool.pytest.ini_options]
+markers = ["slow: tests that take > 5 seconds (sensor buffer, inference)"]
