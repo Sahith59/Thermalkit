@@ -18,61 +18,44 @@ Nobody has built a system that learns the thermal envelope of a specific Apple S
 
 ## How It All Fits Together
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                         ThermalKit Architecture                        │
-│                                                                        │
-│  ┌──────────────────────────┐          ┌──────────────────────────┐   │
-│  │      Sensor Layer        │          │    Bandit Policy         │   │
-│  │                          │          │                          │   │
-│  │  Swift IOKit CLI         │  1 Hz    │  State Vector (6-dim):   │   │
-│  │  PMU tdie1-tdie14        │ ────────→│    cpu_temp (normalised) │   │
-│  │  (CPU die temperatures)  │  JSONL   │    gpu_temp              │   │
-│  │                          │          │    power_w               │   │
-│  │  pmset / vm_stat         │          │    mem_pressure_gb       │   │
-│  │  (battery, memory)       │          │    batt_pct              │   │
-│  │                          │          │    hour_of_day           │   │
-│  │  SensorBuffer            │          │                          │   │
-│  │  deque(maxlen=60)        │          │  Action Space:           │   │
-│  └──────────────────────────┘          │    batch_size ∈ {1,2,4,8}│  │
-│                                        │                          │   │
-│                                        │  Reward Function:        │   │
-│                                        │    tok_sec /             │   │
-│                                        │    (1 + λ·max(0,T−70°C))│   │
-│                                        │                          │   │
-│                                        │  LinUCB Algorithm:       │   │
-│                                        │    α=1.0  (exploration)  │   │
-│                                        │    Persists→policy.npz   │   │
-│                                        └──────────────┬───────────┘   │
-│                                                      │                │
-│                                                      │ chosen action  │
-│                                        ┌─────────────▼────────────┐   │
-│                                        │ thermalkit.generate()    │   │
-│                                        │                          │   │
-│                                        │ mlx_lm.stream_generate() │   │
-│                                        │ + bandit-chosen          │   │
-│                                        │   batch_size             │   │
-│                                        │                          │   │
-│                                        │ Async SQLite log         │   │
-│                                        │ ~/.thermalkit/           │   │
-│                                        │ inference.db             │   │
-│                                        └──────────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────┘
+ThermalKit is a closed-loop controller. The sensor layer reads the machine, the bandit policy learns from what it sees, and the inference layer acts on the chosen action — every call feeds back into the policy.
 
-  thermalkit doctor       thermalkit stats        thermalkit generate --explain
-       │                       │                           │
-       ▼                       ▼                           ▼
-  Health Check            Learning Dashboard         Decision Trace
-  ✓ Apple Silicon         • Mean tok/sec             • State vector
-  ✓ IOKit binary          • Best / worst call        • UCB scores
-  ✓ Sensors OK            • Thermal range            • Chosen action
-  ✓ MLX GPU ready         • Throttle events          • Reason
-  ✓ Policy file           • Trend (improving)        • Result
-  ✓ Inference log         • Bandit state
-  ✓ powermetrics
+```mermaid
+flowchart LR
+    subgraph daemon["ThermalKit Daemon"]
+        direction LR
+
+        subgraph sensors["Sensor Layer"]
+            iokit["Swift IOKit CLI<br/>PMU tdie1-tdie14<br/>CPU die temps"]
+            sysinfo["pmset / vm_stat<br/>battery · memory"]
+            buffer["SensorBuffer<br/>deque maxlen=60"]
+            iokit --> buffer
+            sysinfo --> buffer
+        end
+
+        subgraph policy["Bandit Policy · LinUCB"]
+            state["State Vector 6-dim<br/>cpu_temp · gpu_temp · power_w<br/>mem_pressure · batt_pct · hour"]
+            action["Action Space<br/>batch_size ∈ {1,2,4,8}"]
+            reward["Reward<br/>tok_sec / (1 + λ·max(0, T−70°C))"]
+            state --> action
+            action --> reward
+        end
+
+        gen["thermalkit.generate()<br/>mlx_lm.stream_generate()<br/>+ bandit-chosen batch_size"]
+        log[("Async SQLite log<br/>~/.thermalkit/inference.db")]
+
+        buffer -->|"1 Hz · JSONL"| state
+        reward -->|"chosen action"| gen
+        gen -->|"observed reward"| state
+        gen --> log
+    end
+
+    daemon --> doctor["thermalkit doctor<br/>health check · 7 checks"]
+    daemon --> stats["thermalkit stats<br/>learning dashboard"]
+    daemon --> explain["thermalkit generate --explain<br/>decision trace · UCB scores"]
 ```
 
-The left side reads the machine (sensors). The middle learns from observations (policy). The right side acts on what it learned (inference). CLI commands give visibility into every layer.
+The left side reads the machine (sensors). The middle learns from observations (policy). The right side acts on what it learned (inference), and the result loops back as the next call's reward. The CLI commands give visibility into every layer.
 
 ---
 
