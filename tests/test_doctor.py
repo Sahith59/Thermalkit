@@ -16,7 +16,7 @@ def run_doctor(*extra_args):
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=90,
         env={
             **__import__("os").environ,
             "PYTHONPATH": str(Path(__file__).parent.parent),

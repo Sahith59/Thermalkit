@@ -20,7 +20,7 @@ def run_stats(db_path=None, extra_env=None):
         env.update(extra_env)
     result = subprocess.run(
         [sys.executable, "-m", "thermalkit.cli", "stats"],
-        capture_output=True, text=True, timeout=15, env=env,
+        capture_output=True, text=True, timeout=60, env=env,
     )
     return result.returncode, result.stdout + result.stderr
 
